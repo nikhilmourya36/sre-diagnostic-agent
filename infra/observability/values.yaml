@@ -1,0 +1,54 @@
+# Values for kube-prometheus-stack — tuned down for a small 2-node demo
+# cluster. Defaults from the chart assume a bigger cluster and will eat
+# a large chunk of your t3.medium nodes' resources if left as-is.
+#
+# Reference: https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack
+
+grafana:
+  enabled: true
+  adminPassword: "changeme-before-real-use" # override via --set at install time, don't commit a real password
+  service:
+    type: ClusterIP # access via port-forward for now; add an ingress later if needed
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+prometheus:
+  prometheusSpec:
+    retention: 6h # short retention — this is a demo cluster, not long-term storage
+    resources:
+      requests:
+        cpu: 200m
+        memory: 400Mi
+      limits:
+        cpu: 500m
+        memory: 800Mi
+    # Lets Prometheus discover ServiceMonitors outside its own namespace —
+    # needed so the demo-backend's ServiceMonitor (deployed separately) is
+    # picked up automatically.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+# Node-exporter and kube-state-metrics stay on defaults — they're
+# lightweight and give you real cluster-level metrics (node CPU/memory,
+# pod restart counts) for free, which the agent will want later.
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true

@@ -1,0 +1,23 @@
+# Tells Prometheus (via the Prometheus Operator installed by
+# kube-prometheus-stack) to scrape the demo-backend service's /metrics
+# endpoint. Without this, Prometheus has no idea the service exists —
+# the annotations on the Deployment alone aren't enough once the
+# Operator's ServiceMonitor CRD is in play.
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: demo-backend
+  labels:
+    # This label is what Prometheus's ServiceMonitorSelector matches on
+    # by default in kube-prometheus-stack — release name must match what
+    # you used in `helm install`.
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: demo-backend
+  endpoints:
+    - port: http # must match the named port below, added to the Service
+      path: /metrics
+      interval: 15s

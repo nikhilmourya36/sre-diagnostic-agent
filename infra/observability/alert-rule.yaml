@@ -1,0 +1,31 @@
+# The actual alert rule. This is what eventually fires and (once wired up
+# in a later step) triggers Alertmanager to call the webhook that reaches
+# the diagnostic agent.
+#
+# Starting with exactly ONE rule on purpose — prove this one works
+# end-to-end (fires, resolves, shows up in Alertmanager) before adding
+# the rest of the SOP-driven alerts (pod crash loop, FD exhaustion, etc.)
+# from CLAUDE.md's tool list.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: demo-backend-alerts
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: demo-backend
+      rules:
+        - alert: DemoBackendHighErrorRate
+          expr: demo_backend_error_rate > 0.02
+          for: 1m # must stay above threshold for 1 min before firing — avoids alerting on a single blip
+          labels:
+            severity: critical
+            service: demo-backend
+          annotations:
+            summary: "Demo backend error rate is elevated"
+            description: >-
+              demo_backend_error_rate has been above 2% for over a minute.
+              Current behavior: check whether /break/5xx/on was triggered
+              deliberately for testing, or this is a real regression.

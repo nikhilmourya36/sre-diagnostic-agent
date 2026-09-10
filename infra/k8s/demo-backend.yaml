@@ -1,0 +1,69 @@
+# Minimal deployment for the demo backend — the target service the agent
+# will monitor. Two replicas so a single pod crashing (via /break/crash)
+# is a realistic partial-outage scenario, not a full outage.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-backend
+  labels:
+    app: demo-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo-backend
+  template:
+    metadata:
+      labels:
+        app: demo-backend
+      annotations:
+        # Lets a standard Prometheus setup auto-discover this pod for
+        # scraping without extra ServiceMonitor config. If you're using
+        # kube-prometheus-stack with ServiceMonitor CRDs instead, these
+        # annotations are harmless but unnecessary — a ServiceMonitor
+        # would be the more idiomatic choice, add one once Grafana/
+        # Prometheus are actually installed.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: demo-backend
+          image: demo-backend:latest # replace with your ECR image URI
+          ports:
+            - containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-backend
+  labels:
+    app: demo-backend
+spec:
+  selector:
+    app: demo-backend
+  ports:
+    - name: http # named port — required so the ServiceMonitor can reference it
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
