@@ -34,13 +34,16 @@ being built as part of this project:
 - **Already in place**: PagerDuty and Slack are already set up from prior
   work and get reused as-is, not rebuilt (this is what the earlier
   `slack-pagerduty-incident-bot3` project already integrates with).
-- **The agent**: runs separately from the EKS cluster (a VM, or
-  potentially a different cluster) — it does not run inside the cluster
-  it's monitoring. It connects INTO EKS as one of its checks (via the
-  Kubernetes API), the same way it connects into Grafana, Confluence, etc.
-  Keeping the agent outside the monitored cluster is deliberate: if EKS
-  itself is having a bad day, we don't want the thing diagnosing it to be
-  affected by the same outage.
+- **The agent**: runs in Colab (for demo purposes — reuses the same
+  environment as the prior project), separate from the EKS cluster
+  entirely. It does not run inside the cluster it's monitoring. It
+  connects INTO EKS as one of its checks (via the Kubernetes API), the
+  same way it connects into Grafana, Confluence, etc. Keeping the agent
+  outside the monitored cluster is deliberate: if EKS itself is having a
+  bad day, we don't want the thing diagnosing it to be affected by the
+  same outage. It also has no public inbound URL — see the Trigger
+  section below for how this shapes the alert path (Slack, not a direct
+  webhook).
 
 Because the target infra doesn't exist yet, we get to shape it
 deliberately — e.g. instrumenting the frontend/backend with the specific
@@ -81,9 +84,12 @@ We reuse what already works from that project rather than rebuilding it:
 - The Slack posting pattern (Bolt, Socket Mode, reply-in-thread) carries
   over as-is
 
-What's new here: the trigger is a Grafana webhook instead of a Slack
-message, the tool belt grows from 2 tools to 6, and there's a real RAG
-pipeline (Confluence-backed) instead of no retrieval at all.
+What's new here: the trigger is a Prometheus/Alertmanager alert posted
+into a dedicated Slack channel — still a Slack message, same as the old
+bot's trigger, but from Alertmanager instead of a human, and handled by
+different logic once received. The tool belt grows from 2 tools to 6, and
+there's a real RAG pipeline (Confluence-backed) instead of no retrieval at
+all.
 
 ---
 
@@ -105,13 +111,50 @@ it.
 
 ## How we're going to build this
 
-### Trigger: Grafana → our agent
+### Trigger: Grafana → Slack → our agent (revised — no inbound webhook)
 
-Grafana contact points support arbitrary webhooks. We run a small HTTP
-listener (FastAPI) on the VM that receives the alert payload directly from
-Grafana — no polling. The payload includes the alert name, labels (e.g.
-`service=homepage`), and the current metric values, which becomes the
-starting context for the agent.
+Originally planned as Grafana pushing a webhook directly to an HTTP
+listener on the agent VM. **Revised** once the agent's actual runtime
+environment was decided: the agent runs in Colab for demo purposes, which
+has no public inbound URL by default (unlike the earlier VM assumption).
+Standing up a tunnel (ngrok/similar) just to receive one webhook was more
+complexity than the problem warranted, especially given we already have a
+proven, working, outbound-only pattern from the prior project.
+
+**New flow:**
+
+```
+Grafana --> Alertmanager --> Slack (dedicated alerts-only channel,
+                              via Alertmanager's built-in Slack receiver)
+                                    |
+                      Our existing Slack bot (Socket Mode, outbound only,
+                      exact same pattern as slack-pagerduty-incident-bot3)
+                                    |
+                      LangGraph agent (running in Colab) picks up the
+                      alert message, runs the diagnostic tools,
+                      replies in the same thread
+```
+
+PagerDuty continues to fire in parallel, independently, and is ALSO
+configured to post into Slack directly — so the incident notification and
+the agent's diagnosis both land in the same place, without the agent
+gating or depending on PagerDuty at all.
+
+**Why a dedicated alerts-only channel, not the existing human channel:**
+the bot needs to tell an Alertmanager-posted alert apart from a human
+typing a question. Channel identity alone answers that cleanly — no
+message-content heuristics needed to distinguish "this is a real alert to
+diagnose" from "this is a person asking something."
+
+**What this removes from the plan:** the standalone `webhook/` FastAPI
+receiver is no longer needed — there is no inbound HTTP surface at all.
+The agent's entry point is a Slack event listener, the same shape as
+`handle_message` in the prior project, just watching a different channel
+and triggering the diagnostic flow instead of a single check.
+
+**Still to configure (not yet done):** Alertmanager's Slack receiver
+(standard config, not custom code) pointed at the new dedicated channel;
+PagerDuty's own Slack integration for parallel incident posting.
 
 ### Agent: LangGraph, tool-calling
 
@@ -132,6 +175,22 @@ restarts" as two disconnected facts.
 | `check_grafana_metric` | Grafana query API | Pulls a specific panel's data (e.g. open FD count) when the SOP or reasoning calls for it |
 | `retrieve_sop` | Our own vector DB, synced from Confluence | See RAG section below — never queries Confluence live |
 | `check_recent_releases` | Release/deploy source (Slack `#releases` channel history, or GitHub Releases/Deployments API) | Filtered to last 24h, filtered to the affected service where possible |
+
+**Tool implementation: plain LangGraph `@tool` functions, not an MCP
+server.** Decided deliberately — we know the exact tool set upfront and
+only this one agent calls them, so MCP's dynamic-discovery / cross-client
+benefits don't apply here, while its cost (a new service to deploy and
+maintain, a new transport/auth surface) would add real complexity on top
+of an already multi-layer new build (EKS, Prometheus, LangGraph, RAG, all
+new at once). Each tool is just a Python function the agent's own process
+calls directly — `requests` to Grafana/Prometheus, the `kubernetes`
+client for K8s, a direct call into the vector DB for `retrieve_sop`.
+
+Revisit this only as a deliberate "v2" once the core loop is proven
+working — e.g. if we want other tools/agents to reuse the same "check K8s
+workload" capability, or specifically want to demonstrate MCP server
+design as a distinct portfolio skill. Don't reintroduce it mid-build
+without one of those reasons.
 
 ### RAG: Confluence-backed SOP lookup
 
@@ -202,17 +261,22 @@ build order starts even earlier than the tool-by-tool plan below implies:
    against the break-switch endpoints above BEFORE connecting it to
    Alertmanager/Slack/the agent. (`infra/observability/`, in progress.)
 
-0.75. **Wire Alertmanager to Slack directly, still no agent involved.**
-   Confirm a real Prometheus alert reaches Slack as a plain notification,
-   with a human as the only responder — this proves the alerting pipeline
-   end-to-end before any agent code exists.
+0.75. **Wire Alertmanager to post into a dedicated alerts-only Slack
+   channel, still no agent involved.** Confirm a real Prometheus alert
+   reaches that channel as a plain notification, with a human as the only
+   responder — this proves the alerting pipeline end-to-end before any
+   agent code exists. Also configure PagerDuty's own Slack integration
+   here, so incident notifications land in Slack too (parallel to, not
+   through, the agent).
 
 1. Confluence sync job, standalone — this has no dependency on EKS/Grafana
    and can be finished independently (already in progress)
 
-2. Grafana webhook receiver — confirm we can receive and parse a real
-   alert payload from the real Grafana instance, once step 0's alerting is
-   confirmed working
+2. Agent's Slack listener — a `handle_message`-style listener (same
+   pattern as the prior project) watching the dedicated alerts-only
+   channel, confirming it can receive and parse a real Alertmanager-posted
+   alert message, once step 0.75 is confirmed working. No inbound HTTP
+   receiver needed — see the Trigger section above for why.
 
 3. Three tools only to start: `check_site_health`, `check_k8s_workload`,
    `retrieve_sop` — get the agent loop working end-to-end against the real

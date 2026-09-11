@@ -1,0 +1,28 @@
+# Secrets — never commit these
+.env
+*.env
+!.env.example
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Kubeconfig — never commit cluster credentials
+kubeconfig*
+*.kubeconfig
