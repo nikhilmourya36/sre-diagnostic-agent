@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
         - name: demo-backend
-          image: demo-backend:latest # replace with your ECR image URI
+          image: 495209412316.dkr.ecr.us-east-1.amazonaws.com/demo-backend:latest
           ports:
             - containerPort: 8080
           livenessProbe:

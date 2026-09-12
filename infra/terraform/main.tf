@@ -57,7 +57,10 @@ module "eks" {
   version = "~> 20.0"
 
   cluster_name    = var.cluster_name
-  cluster_version = "1.35"
+  cluster_version = "1.35" # one version behind latest (1.36) for stability —
+  # AWS EKS periodically retires old versions from new-cluster creation, so
+  # if this fails with "unsupported Kubernetes version" again in the
+  # future, check current supported versions and bump this
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
@@ -80,6 +83,26 @@ module "eks" {
 }
 
 # ---------------------------------------------------------------------------
+# ECR repository — for the demo-backend image.
+#
+# Deliberately NOT scan-on-push: basic scanning is free either way, but
+# scan-on-push adds a delay to every push and isn't needed for a demo
+# project. Enhanced (paid) scanning is never enabled here.
+# ---------------------------------------------------------------------------
+
+resource "aws_ecr_repository" "demo_backend" {
+  name                 = "demo-backend"
+  image_tag_mutability = "MUTABLE" # lets `:latest` be overwritten on each push — fine for a demo, not for prod
+
+  image_scanning_configuration {
+    scan_on_push = false
+  }
+
+  force_delete = true # lets `terraform destroy` remove the repo even if it still has images in it —
+  # convenient for a demo project you rebuild often; would NOT want this on a real prod repo
+}
+
+# ---------------------------------------------------------------------------
 # Outputs
 # ---------------------------------------------------------------------------
 
@@ -93,4 +116,8 @@ output "cluster_endpoint" {
 
 output "configure_kubectl" {
   value = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
+}
+
+output "ecr_repository_url" {
+  value = aws_ecr_repository.demo_backend.repository_url
 }

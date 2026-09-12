@@ -111,40 +111,43 @@ it.
 
 ## How we're going to build this
 
-### Trigger: Grafana → Slack → our agent (revised — no inbound webhook)
+### Trigger: Grafana → PagerDuty → Slack → our agent (revised twice)
 
 Originally planned as Grafana pushing a webhook directly to an HTTP
-listener on the agent VM. **Revised** once the agent's actual runtime
-environment was decided: the agent runs in Colab for demo purposes, which
-has no public inbound URL by default (unlike the earlier VM assumption).
-Standing up a tunnel (ngrok/similar) just to receive one webhook was more
-complexity than the problem warranted, especially given we already have a
-proven, working, outbound-only pattern from the prior project.
+listener on the agent VM. **First revision**: once the agent's actual
+runtime environment was decided (Colab, for demo purposes, no public
+inbound URL by default), switched to Alertmanager posting into Slack
+directly, with our agent's Slack bot picking it up the same outbound-only
+way the prior project's bot worked. **Second revision** (current):
+Alertmanager posts to PagerDuty instead of Slack directly, and PagerDuty's
+own Slack integration is what actually lands the message in Slack — one
+integration to maintain instead of two, and it reuses the already-working
+PagerDuty setup from the prior project rather than building a second
+parallel notification path. Accepted tradeoff: Slack visibility now
+depends on PagerDuty's Slack integration being up, since there's no
+independent Alertmanager -> Slack path anymore — fine for a demo project.
 
-**New flow:**
+**Current flow:**
 
 ```
-Grafana --> Alertmanager --> Slack (dedicated alerts-only channel,
-                              via Alertmanager's built-in Slack receiver)
+Grafana --> Alertmanager --> PagerDuty (Events API)
+                                    |
+                      PagerDuty's own Slack integration posts the
+                      incident into the dedicated alerts-only channel
                                     |
                       Our existing Slack bot (Socket Mode, outbound only,
                       exact same pattern as slack-pagerduty-incident-bot3)
                                     |
                       LangGraph agent (running in Colab) picks up the
-                      alert message, runs the diagnostic tools,
+                      incident message, runs the diagnostic tools,
                       replies in the same thread
 ```
 
-PagerDuty continues to fire in parallel, independently, and is ALSO
-configured to post into Slack directly — so the incident notification and
-the agent's diagnosis both land in the same place, without the agent
-gating or depending on PagerDuty at all.
-
 **Why a dedicated alerts-only channel, not the existing human channel:**
-the bot needs to tell an Alertmanager-posted alert apart from a human
+the bot needs to tell a PagerDuty-posted incident apart from a human
 typing a question. Channel identity alone answers that cleanly — no
-message-content heuristics needed to distinguish "this is a real alert to
-diagnose" from "this is a person asking something."
+message-content heuristics needed to distinguish "this is a real incident
+to diagnose" from "this is a person asking something."
 
 **What this removes from the plan:** the standalone `webhook/` FastAPI
 receiver is no longer needed — there is no inbound HTTP surface at all.
@@ -253,7 +256,12 @@ build order starts even earlier than the tool-by-tool plan below implies:
    We need a real, reliable way to *cause* a 5xx spike or a pod crash on
    demand — the backend ships with `/break/5xx/on` and `/break/crash`
    endpoints for exactly this — so later steps can be tested against a
-   real trigger instead of imagined ones. (`infra/` folder, in progress.)
+   real trigger instead of imagined ones. (`infra/` folder, done.)
+   Known limitation: the break switches are per-pod (in-memory, not
+   shared across replicas) — if a break switch seems "stuck," run
+   `kubectl rollout restart deployment demo-backend` to force a clean
+   state. Full explanation in `infra/README.md`. Not being fixed — it's
+   test-harness behavior, not something the actual agent needs to handle.
 
 0.5. **Install Prometheus + Grafana on the new cluster, from scratch.**
    Via `kube-prometheus-stack` (Helm). Wire up scraping for the demo
@@ -261,21 +269,29 @@ build order starts even earlier than the tool-by-tool plan below implies:
    against the break-switch endpoints above BEFORE connecting it to
    Alertmanager/Slack/the agent. (`infra/observability/`, in progress.)
 
-0.75. **Wire Alertmanager to post into a dedicated alerts-only Slack
-   channel, still no agent involved.** Confirm a real Prometheus alert
-   reaches that channel as a plain notification, with a human as the only
-   responder — this proves the alerting pipeline end-to-end before any
-   agent code exists. Also configure PagerDuty's own Slack integration
-   here, so incident notifications land in Slack too (parallel to, not
-   through, the agent).
+0.75. **Wire Alertmanager directly to PagerDuty (not to Slack).**
+   Revised from the original plan of a separate Alertmanager -> Slack
+   receiver: PagerDuty already has a mature, purpose-built Slack
+   integration (incident links, ack/resolve buttons, proper formatting) —
+   reusing it means one integration to maintain instead of two, and it
+   reuses the already-working PagerDuty setup from the prior project
+   instead of building a second parallel notification path. Alertmanager
+   posts directly to PagerDuty's Events API; PagerDuty's own Slack app
+   posts the incident into the dedicated alerts-only channel from there.
+   Known tradeoff, accepted deliberately: Slack visibility now depends on
+   PagerDuty's integration being up, since there's no independent
+   Alertmanager -> Slack path anymore. Fine for a demo project. Confirm a
+   real Prometheus alert reaches PagerDuty AND shows up in the dedicated
+   Slack channel, with a human as the only responder, before any agent
+   code exists.
 
 1. Confluence sync job, standalone — this has no dependency on EKS/Grafana
    and can be finished independently (already in progress)
 
 2. Agent's Slack listener — a `handle_message`-style listener (same
    pattern as the prior project) watching the dedicated alerts-only
-   channel, confirming it can receive and parse a real Alertmanager-posted
-   alert message, once step 0.75 is confirmed working. No inbound HTTP
+   channel, confirming it can receive and parse a real PagerDuty-posted
+   incident message, once step 0.75 is confirmed working. No inbound HTTP
    receiver needed — see the Trigger section above for why.
 
 3. Three tools only to start: `check_site_health`, `check_k8s_workload`,
@@ -304,3 +320,12 @@ cluster are all new and need to be built as part of steps 0-2 above.
 - Any automated remediation/rollback — this project diagnoses and informs,
   it does not take corrective action on its own
 - Replacing or modifying the existing PagerDuty paging path
+
+## Naming note
+
+The repo/project is named `sre-diagnostic-agent`. The EKS cluster itself
+is named `diagnostic-agent-demo` (`infra/terraform/variables.tf`) —
+deliberately left as-is rather than renamed, since the cluster was already
+provisioned under that name and renaming would require a destroy/recreate
+for no functional benefit. Not a bug, not inconsistent tooling — just two
+names that came from different points in time.

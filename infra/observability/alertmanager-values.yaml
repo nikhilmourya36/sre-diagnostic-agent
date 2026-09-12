@@ -1,0 +1,76 @@
+# Alertmanager -> PagerDuty config, applied as a Helm values override on
+# TOP of infra/observability/values.yaml (which doesn't define
+# alertmanagerSpec.config at all — this file is what wires the PagerDuty
+# receiver).
+#
+# PagerDuty then posts into Slack via its OWN Slack integration — not
+# configured here, that's a one-time setup in PagerDuty's own settings
+# (see the README section below).
+#
+# DO NOT commit a real PagerDuty integration key in this file. Copy this
+# to alertmanager-values.local.yaml (already gitignored — see .gitignore),
+# fill in your real key there, and pass BOTH files to helm upgrade.
+#
+# Usage:
+#   cp infra/observability/alertmanager-values.yaml infra/observability/alertmanager-values.local.yaml
+#   # edit alertmanager-values.local.yaml, replace the placeholder integration key
+#   helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+#     --namespace monitoring \
+#     -f infra/observability/values.yaml \
+#     -f infra/observability/alertmanager-values.local.yaml
+#
+# --- Getting a PagerDuty integration key ---
+# This is DIFFERENT from the REST API key used by agent/pagerduty_client.py.
+# 1. PagerDuty -> Services -> select your service (the same one
+#    pagerduty_client.py already points at, via PAGERDUTY_SERVICE_ID)
+# 2. Integrations tab -> Add Integration -> search for "Prometheus" or
+#    use "Events API v2" generically if Prometheus isn't listed as a
+#    named option
+# 3. Copy the generated "Integration Key" (sometimes shown as
+#    "Routing Key") — that's what goes below as routing_key
+#
+# --- Getting PagerDuty's incidents into Slack ---
+# This is a ONE-TIME setup in PagerDuty itself, not in this file:
+# PagerDuty -> Integrations -> Slack -> connect your workspace -> choose
+# the dedicated alerts-only channel. Once connected, every incident
+# PagerDuty creates (regardless of source) posts there automatically.
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+  config:
+    global:
+      resolve_timeout: 5m
+
+    route:
+      receiver: "pagerduty-sre"
+      group_by: ["alertname", "service"]
+      group_wait: 10s
+      group_interval: 30s
+      repeat_interval: 4h
+      routes:
+        # The chart ships a built-in "Watchdog" alert (a heartbeat that
+        # always fires, used to confirm the alerting pipeline itself is
+        # alive) — route it to a no-op receiver so it doesn't create a
+        # PagerDuty incident every few minutes forever.
+        - receiver: "null-receiver"
+          matchers:
+            - alertname = "Watchdog"
+
+    receivers:
+      - name: "pagerduty-sre"
+        pagerduty_configs:
+          - routing_key: "REPLACE-WITH-YOUR-REAL-INTEGRATION-KEY"
+            severity: "critical"
+            description: "{{ .CommonAnnotations.summary }}"
+            details:
+              description: "{{ .CommonAnnotations.description }}"
+              firing_alerts: "{{ .Alerts.Firing | len }}"
+      - name: "null-receiver" # intentionally empty — Watchdog alerts go here and are dropped

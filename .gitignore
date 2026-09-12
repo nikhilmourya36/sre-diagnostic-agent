@@ -26,3 +26,7 @@ Thumbs.db
 # Kubeconfig — never commit cluster credentials
 kubeconfig*
 *.kubeconfig
+
+# alertmanager-values.yaml — never commit secrets- used for pageduty kay 
+
+alertmanager-values.local.yaml
