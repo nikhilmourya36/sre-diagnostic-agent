@@ -6,11 +6,7 @@ except confirm auth works and show you the shape of a real page's content,
 so we know what we're actually parsing in the next step.
 
 Usage:
-    export CONFLUENCE_BASE_URL="https://yourcompany.atlassian.net/wiki"
-    export CONFLUENCE_EMAIL="you@yourcompany.com"
-    export CONFLUENCE_API_TOKEN="..."
-    export CONFLUENCE_SPACE_KEY="OPS"
-
+    Fill in .env at the project root (copy from .env.example), then:
     python sync/00_test_connection.py
 """
 from __future__ import annotations
@@ -19,6 +15,9 @@ import os
 import sys
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()  # loads .env from the current or parent directory automatically
 
 BASE_URL = os.environ.get("CONFLUENCE_BASE_URL", "").rstrip("/")
 EMAIL = os.environ.get("CONFLUENCE_EMAIL", "")

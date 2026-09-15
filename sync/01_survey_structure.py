@@ -7,7 +7,7 @@ text/tables with no structure? This script answers that with real data
 instead of us guessing from one page.
 
 Usage:
-    (same env vars as 00_test_connection.py)
+    (.env at project root, same as 00_test_connection.py)
     python sync/01_survey_structure.py
 """
 from __future__ import annotations
@@ -17,6 +17,9 @@ import re
 import sys
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BASE_URL = os.environ.get("CONFLUENCE_BASE_URL", "").rstrip("/")
 EMAIL = os.environ.get("CONFLUENCE_EMAIL", "")
