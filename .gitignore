@@ -30,3 +30,5 @@ kubeconfig*
 # alertmanager-values.yaml — never commit secrets- used for pageduty kay 
 
 alertmanager-values.local.yaml
+
+CLAUDE.md
