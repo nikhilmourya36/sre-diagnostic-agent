@@ -1,3 +1,14 @@
+## 🚀 AI SRE Agent
+
+![AI SRE Agent Demo](./demo/Video%20Project%201.gif)
+
+
+
+### 🏗️ Architecture
+
+[View Animated Architecture](./demo/sre_agent_animated_flow_icons.html)
+
+
 # SRE Diagnostic Agent
 
 An AI agent that turns a real incident alert into an actual diagnosis —
