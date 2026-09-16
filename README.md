@@ -6,7 +6,7 @@
 
 ### 🏗️ Architecture
 
-[View Animated Architecture](./demo/sre_agent_animated_flow_icons.html)
+[View Animated Architecture](https://nikhilmourya36.github.io/sre-diagnostic-agent/demo/sre_agent_animated_flow_icons.html)
 
 
 # SRE Diagnostic Agent
