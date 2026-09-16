@@ -102,10 +102,16 @@ def break_5xx_off():
 
 @app.route("/break/crash", methods=["POST"])
 def break_crash():
-    # Exits immediately. Under Kubernetes, this causes the pod to
-    # terminate and restart — use this to test pod-restart / crash-loop
-    # detection in the agent later.
-    sys.exit(1)
+    # os._exit() terminates the OS process immediately, bypassing Python's
+    # normal interpreter shutdown -- unlike sys.exit(), which only raises
+    # SystemExit in the current thread. Flask's dev server runs request
+    # handling in a separate thread, so sys.exit() from inside a request
+    # handler only kills that thread (Flask's dev server catches it and
+    # keeps running) -- the container's main process survives, and
+    # Kubernetes never sees a failure worth restarting for. os._exit()
+    # kills the whole process unconditionally, which is what actually
+    # gets Kubernetes to detect the crash and restart the pod.
+    os._exit(1)
 
 
 if __name__ == "__main__":

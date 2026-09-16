@@ -71,7 +71,19 @@ def chunk_by_heading(title: str, body_html: str) -> list[dict]:
     Each chunk includes its own heading as a prefix, so retrieval
     results are self-contained and readable without needing the parent
     page's title repeated externally.
+
+    "Related SOPs" sections are deliberately EXCLUDED from embedding.
+    They're just a list of other SOP titles (e.g. "Related SOPs: 5xx
+    Error Rate Spike — Homepage") — short, dense chunks that are almost
+    entirely made of another SOP's exact title text. That makes them
+    embed suspiciously close to queries about that topic, often closer
+    than the real SOP's own (longer, more varied) content — so they
+    were winning top-1 retrieval slots away from the actual relevant
+    SOP. They add no diagnostic value on their own; cross-referencing
+    is useful for a human reading the doc, not for retrieval ranking.
     """
+    EXCLUDED_HEADINGS = {"related sops", "related sop"}
+
     matches = list(HEADING_RE.finditer(body_html))
 
     if not matches:
@@ -84,6 +96,10 @@ def chunk_by_heading(title: str, body_html: str) -> list[dict]:
     chunks = []
     for i, match in enumerate(matches):
         heading_text = TAG_STRIP_RE.sub("", match.group(2)).strip()
+
+        if heading_text.strip().lower() in EXCLUDED_HEADINGS:
+            continue
+
         section_start = match.end()
         section_end = matches[i + 1].start() if i + 1 < len(matches) else len(body_html)
         section_html = body_html[section_start:section_end]
@@ -123,7 +139,25 @@ def fetch_all_pages(auth) -> list[dict]:
         if start > 500:
             print("Hit 500-page safety cap, stopping early.")
             break
-    return pages
+
+    # Filter out Confluence's own starter template pages and any
+    # obviously-placeholder titles — these aren't real SOPs and pollute
+    # retrieval results if embedded. Adjust this list if your space's
+    # template names differ, or if you rename/remove a stray page instead.
+    EXCLUDED_TITLE_PREFIXES = ("Template -", "Untitled live doc")
+    EXCLUDED_EXACT_TITLES = {"SOP"}  # a bare "SOP" page is very likely a stray/placeholder, not real content
+
+    filtered = [
+        p
+        for p in pages
+        if not p.get("title", "").startswith(EXCLUDED_TITLE_PREFIXES)
+        and p.get("title", "") not in EXCLUDED_EXACT_TITLES
+    ]
+    skipped = len(pages) - len(filtered)
+    if skipped:
+        print(f"Filtered out {skipped} template/placeholder page(s) before embedding.")
+
+    return filtered
 
 
 def load_sync_state() -> dict:

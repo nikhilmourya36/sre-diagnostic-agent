@@ -1,0 +1,22 @@
+# Core
+python-dotenv
+
+# Slack
+slack-bolt
+
+# Confluence sync + vector DB
+requests
+chromadb
+sentence-transformers
+
+# LLM (add the SDK matching LLM_PROVIDER in .env)
+# anthropic
+
+# k8s for checking k8s worload status tools
+kubernetes
+
+# LangGraph agent
+langchain
+langchain-core
+langchain-groq
+langgraph
